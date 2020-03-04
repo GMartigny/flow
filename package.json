@@ -1,0 +1,17 @@
+{
+    "name": "boxed-liquid",
+    "version": "0.1.0",
+    "description": "",
+    "main": "public/index.js",
+    "scripts": {
+        "build": "snowpack --dest public/modules --optimize --stat"
+    },
+    "author": "GMartigny",
+    "license": "MIT",
+    "devDependencies": {
+        "snowpack": "^1.5.0"
+    },
+    "dependencies": {
+        "pencil.js": "^1.15.0"
+    }
+}
