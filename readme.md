@@ -1,4 +1,4 @@
-# boxed-liquid
+# Flow
 
 "Liquid" simulation using device accelerometer and gyroscope.
 
