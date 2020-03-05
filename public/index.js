@@ -1,5 +1,6 @@
-import { Scene, Circle, Position, Particles, Text, Math as M } from "./modules/pencil.js";
+import { Scene, Container, Circle, Particles, Slider, Text, Math as M, MouseEvent } from "https://unpkg.com/pencil.js@1.15.0/dist/pencil.esm.js";
 import QuadTree, { Bound } from "./quadtree.js";
+import Position from "./position.js";
 
 // Add a button asking for full-screen
 const askForFullScreen = async () => new Promise((resolve) => {
@@ -25,11 +26,15 @@ const verlet = (component, getForces) => {
     const previous = component.position.clone();
 
     if (component.previousPosition) {
-        component.position.add(
-            component.position.clone()
-                .subtract(component.previousPosition)
-                .multiply(1 - friction),
-        );
+        const speed = new Position(component.position.x, component.position.y)
+            .subtract(component.previousPosition)
+            .multiply(1 - friction);
+        const max = 10;
+        const speedStrength = speed.length;
+        if (speedStrength > max) {
+            speed.multiply(max / speedStrength);
+        }
+        component.position.add(speed);
 
         component.previousPosition.set(previous);
     }
@@ -41,40 +46,76 @@ const verlet = (component, getForces) => {
 };
 
 (async () => {
-    await askForFullScreen();
-    await nextFrame();
-    await screen.orientation.lock("portrait-primary");
+    // Device acceleration
+    const acceleration = new Position();
+    // Device orientation
+    const orientation = new Position(0, 1);
 
-    const scene = new Scene();
+    let scene;
 
-    const bounce = 0.4; // Bounce strength
-    const gravity = 0.08; // Gravity constant
-    const orientation = new Position(0, 1); // Device orientation
-    const accelerometer = new Accelerometer({
-        frequency: 60,
-    });
+    const isHandHeld = Boolean(navigator.maxTouchPoints);
+    if (isHandHeld) {
+        const g = 9.80665;
 
-    accelerometer.addEventListener("reading", () => {
-        orientation.set(-accelerometer.x / 10, accelerometer.y / 10);
-    });
-    accelerometer.start();
+        // Read accelerometer values
+        const laSensor = new LinearAccelerationSensor({
+            frequency: 60,
+        });
+        laSensor.addEventListener("reading", () => {
+            acceleration.set(-laSensor.x / (g / 4), laSensor.y / (g / 4));
+        });
+        laSensor.start();
+
+        // Read gyroscope values
+        const accelerometer = new Accelerometer({
+            frequency: 60,
+        });
+        accelerometer.addEventListener("reading", () => {
+            orientation.set(-accelerometer.x / g, accelerometer.y / g);
+        });
+        accelerometer.start();
+
+        // Go full-screen, this is required to lock screen rotation
+        await askForFullScreen();
+        // Wait for screen size to update
+        await nextFrame();
+
+        // Lock screen rotation
+        await screen.orientation.lock("portrait-primary");
+
+        scene = new Scene();
+    }
+    else {
+        scene = new Scene();
+        scene.on(MouseEvent.events.move, () => {
+            const { cursorPosition, center, width, height } = scene;
+            orientation.set(cursorPosition.clone().subtract(center).multiply(0.5 / width, 0.5 / height));
+        }, true);
+    }
+
+    const bounce = 0.5; // Bounce strength
+    const gravity = 0.4; // Gravity constant
 
     const quadTree = new QuadTree(new Bound(0, 0, scene.width, scene.height));
 
-    const nbParticles = 500;
+    const nbParticles = Math.round((scene.width * scene.height) / 1000);
     const base = new Circle(undefined, 6, {
         fill: "#1c79ff",
     });
     const liquid = new Particles(undefined, base, nbParticles, () => ({
-        position: scene.getRandomPosition(),
+        position: new Position(M.random(scene.width), M.random(scene.height)),
     }), (particle) => {
         verlet(particle, () => {
             const forces = new Position();
 
-            forces.add(orientation.clone().multiply(gravity));
+            forces
+                .add(orientation.clone().multiply(gravity))
+                .add(acceleration.clone().multiply(gravity));
 
             const { position } = particle;
             const { radius } = base;
+            const tmp = new Position();
+
             // Bounce on walls
             [
                 [position.x, 0, position.y], // left
@@ -83,9 +124,9 @@ const verlet = (component, getForces) => {
                 [scene.height - position.y, position.x, scene.height], // bottom
             ].forEach(([distance, x, y]) => {
                 if (distance < radius) {
-                    forces.add(position.clone()
+                    forces.add(tmp.set(position)
                         .subtract(x, y)
-                        .divide(distance)
+                        .multiply(1 / distance)
                         .multiply((distance - radius) * (-bounce)));
                 }
             });
@@ -97,12 +138,12 @@ const verlet = (component, getForces) => {
                     const distance = position.distance(other);
                     const field = radius * 2;
                     if (distance < field) {
-                        const pushBack = position.clone()
+                        const pushBack = tmp.set(position)
                             .subtract(other)
-                            .divide(distance)
+                            .multiply(1 / distance)
                             .multiply((distance - field) * (-bounce / 2));
                         forces.add(pushBack);
-                        other.add(pushBack.multiply(-1));
+                        other.subtract(pushBack);
                     }
                 }
             });
@@ -111,39 +152,46 @@ const verlet = (component, getForces) => {
         });
     });
 
-    const debug = new Text([10, 10]);
-    debug.hide();
+    // Debug
+    const debug = new Container([10, 10]);
 
-    const precision = 3;
-    const fps = [];
+    const slider = new Slider(undefined, {
+        min: 0.3,
+        max: 4,
+        value: 1,
+    });
+    slider.on(Slider.events.change, () => {
+        const objective = Math.round(slider.value * nbParticles);
+        const diff = objective - liquid.data.length;
+
+        // Add
+        if (diff > 0) {
+            for (let i = 0; i < diff; ++i) {
+                liquid.data.push({
+                    ...Particles.defaultData,
+                    position: scene.getRandomPosition(),
+                });
+            }
+        }
+        // Remove
+        else if (diff < 0) {
+            liquid.data.splice(0, -diff);
+        }
+    });
+
+    const debugText = new Text([slider.width + 10, 0]);
+    debug.add(debugText, slider).hide();
+
     scene
         .add(liquid, debug)
         .startLoop()
         .on(Scene.events.draw, () => {
-            fps.push(scene.fps);
-            if (fps.length > 60) {
-                fps.splice(0, 1);
-            }
-            const mean = M.average(...fps);
-
-            if (debug.options.shown && scene.frameCount % 20 === 0) {
-                debug.text = `${mean.toFixed(1)}
-${liquid.data.length}`;
-            }
-
-            if (mean > 55) {
-                for (let i = 0; i < precision; ++i) {
-                    liquid.data.push({
-                        ...Particles.defaultData,
-                        position: scene.getRandomPosition(),
-                    });
-                }
-            }
-            else if (mean < 45) {
-                liquid.data.splice(0, precision);
-            }
-
             const { width, height } = scene;
+
+            if (debug.options.shown) {
+                debugText.text = liquid.data.length;
+            }
+
             quadTree.reset(new Bound(0, 0, width, height));
             liquid.data.forEach(particle => quadTree.add(particle.position));
         }, true)

@@ -65,7 +65,6 @@ export default class QuadTree {
                 this.subs.forEach((sub) => {
                     points.push(...sub.get(bound));
                 });
-                // points.push(...this.subs.map(sub => sub.get(bound)).flat());
             }
             else {
                 this.points.forEach((point) => {
@@ -73,9 +72,6 @@ export default class QuadTree {
                         points.push(point);
                     }
                 });
-                // points.push(
-                //     ...this.points.filter(point => bound.isInside(point)),
-                // );
             }
         }
 
@@ -88,4 +84,4 @@ export default class QuadTree {
         this.bound = newBound;
     }
 }
-QuadTree.MAX_CAPACITY = 4;
+QuadTree.MAX_CAPACITY = 50;
